@@ -24,6 +24,9 @@ pip install -r requirements.txt
 ## Usage / 使用方法
 1. Start the application / 启动应用：
 
+Modify your own zhipuai API key in the path PPT text translation\src\utils\config.py
+在路径PPT text  translation\src\utils\config.py中修改自己的zhipuai的APIkey
+
 bash
 python main.py
 
@@ -32,11 +35,13 @@ python main.py
 
 http://localhost:7860
 
+3.Model Recommendation/模型推荐
+GLM4-1M is recommended for offline models/离线模型推荐使用GLM4-1M
+The online model API recommends using glm-4-long/在线模型API建议使用glm-4-long
 
-
-3. Select PPT file and configure translation settings / 选择PPT文件并配置翻译设置
-4. Click "Start Translation" / 点击"开始翻译"
-5. Monitor translation progress and verify results / 监控翻译进度并验证结果
+4. Select PPT file and configure translation settings / 选择PPT文件并配置翻译设置
+5. Click "Start Translation" / 点击"开始翻译"
+6. Monitor translation progress and verify results / 监控翻译进度并验证结果
 
 ## Configuration / 配置说明
 - `data/config.json`: Main configuration file / 主配置文件
