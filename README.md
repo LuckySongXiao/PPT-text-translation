@@ -4,6 +4,9 @@
 A professional PowerPoint translation tool that supports Chinese-English bidirectional translation with terminology management.
 专业的PPT翻译工具，支持中英双向翻译，并具备术语库管理功能。
 
+This tool can only improve work efficiency by 70%. We still need to spend 30% of our time to check for omissions and manually correct content and format. Due to the limitations of model stability and hardware equipment, the rate of missed translations varies. In the official API test using glm-zero, only two perfect translations appeared in ten times.
+本工具仅能提升70%的工作效率，我们仍需花费30%的时间来查漏补缺、手动修正内容及格式，因为模型稳定性和硬件设备的局限性，漏译率时高时低，在使用glm-zero的官方API测试中，十次里面仅出现了两次完美翻译。
+
 ## Features / 功能特点
 - Support PPT/PPTX file translation / 支持PPT/PPTX文件翻译
 - Professional terminology management / 专业术语库管理
