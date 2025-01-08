@@ -17,8 +17,8 @@ A professional PowerPoint translation tool that supports Chinese-English bidirec
 ## Installation / 安装方法
 
 bash
-git clone https://github.com/yourusername/ppt-translator.git
-cd ppt-translator
+git clone https://github.com/LuckySongXiao/PPT-text-translation.git
+cd PPT-text-translation
 pip install -r requirements.txt
 
 ## Usage / 使用方法
