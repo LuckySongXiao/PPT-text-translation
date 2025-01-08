@@ -1,0 +1,13 @@
+{
+  "api_key": "Please enter your API key",
+  "target_language": "英文",
+  "model": "glm-4-flash",
+  "model_config": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 2000
+  },
+  "use_online": true,
+  "server_url": "http://localhost:11434",
+  "api_type": "zhipuai"
+}
