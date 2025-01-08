@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 import pandas as pd
 import threading
@@ -15,6 +15,8 @@ import time
 from pptx.util import Pt
 import re
 from langdetect import detect
+import string
+import math
 
 class Translator:
     def __init__(self, config):
@@ -67,6 +69,22 @@ class Translator:
             output_path = output_dir / f"{file_name}_{timestamp}_translated.pptx"
             excel_path = output_dir / f"{file_name}_{timestamp}_record.xlsx"
             
+            # 创建空的Excel文件
+            pd.DataFrame(columns=["页码", "位置", "格式", "原文", "翻译结果"]).to_excel(excel_path, index=False)
+            
+            # 加载PPT
+            prs = Presentation(input_path)
+            total_slides = len(prs.slides)
+            print(f"\n开始翻译PPT文件: {file_name}")
+            print(f"总页数: {total_slides}")
+            print("="*50)
+            
+            # 添加进度回调
+            if self.progress_callback:
+                self.progress_callback(f"\n开始翻译PPT文件: {file_name}")
+                self.progress_callback(f"总页数: {total_slides}")
+                self.progress_callback("="*50)
+            
             # 启动Excel写入线程
             self.excel_thread = threading.Thread(
                 target=self._excel_writer_thread,
@@ -74,10 +92,6 @@ class Translator:
                 daemon=True
             )
             self.excel_thread.start()
-            
-            # 加载PPT
-            prs = Presentation(input_path)
-            total_slides = len(prs.slides)
             
             # 计算总任务数
             total_tasks = self._calculate_total_tasks(prs)
@@ -93,6 +107,11 @@ class Translator:
             
             # 处理每一页
             for slide_idx, slide in enumerate(prs.slides, 1):
+                print(f"\n正在处理第 {slide_idx}/{total_slides} 页")
+                # 添加进度回调
+                if self.progress_callback:
+                    self.progress_callback(f"\n正在处理第 {slide_idx}/{total_slides} 页")
+                
                 current_progress["slide"] = slide_idx
                 
                 for shape_idx, shape in enumerate(slide.shapes, 1):
@@ -116,10 +135,18 @@ class Translator:
                         except Exception as e:
                             print(f"保存进度时出错: {str(e)}")
             
+                print(f"第 {slide_idx} 页处理完成")
+                print("-"*50)
+            
             # 等待所有Excel写入任务完成
             self.excel_queue.put(None)  # 发送结束信号
             self.excel_queue.join()
             self.excel_thread.join()
+            
+            print("\n翻译完成！")
+            print(f"输出文件: {output_path}")
+            print(f"翻译记录: {excel_path}")
+            print("="*50)
             
             # 完成翻译后显示复检完成消息
             final_status = {
@@ -136,6 +163,7 @@ class Translator:
             return final_status
             
         except Exception as e:
+            print(f"\n翻译失败: {str(e)}")
             raise Exception(f"PPT翻译失败: {str(e)}")
     
     def _calculate_total_tasks(self, prs) -> int:
@@ -158,17 +186,20 @@ class Translator:
 
             # 收集需要翻译的文本
             if shape.has_table:
+                print(f"\n处理表格...")
                 for row_idx, row in enumerate(shape.table.rows):
                     for col_idx, cell in enumerate(row.cells):
                         if cell.text.strip():
                             location = f"Slide{slide_idx}-Table-Row{row_idx+1}-Column{col_idx+1}"
                             texts_to_translate.append(cell.text.strip())
                             text_locations.append((cell.text_frame, location, shape))
+                            print(f"发现表格文本 - 位置: {location}")
 
             elif hasattr(shape, "text_frame") and shape.text_frame.text.strip():
                 location = f"Slide{slide_idx}-TextBox"
                 texts_to_translate.append(shape.text_frame.text.strip())
                 text_locations.append((shape.text_frame, location, shape))
+                print(f"发现文本框 - 位置: {location}")
 
             # 批量翻译文本
             if texts_to_translate:
@@ -182,6 +213,7 @@ class Translator:
 
             # 处理组合形状
             if hasattr(shape, "group_items"):
+                print(f"\n处理组合形状...")
                 for item in shape.group_items:
                     self._process_shape_with_progress(item, slide_idx, use_terminology, progress)
 
@@ -329,20 +361,29 @@ class Translator:
                 context="ppt"
             )
             
+            # 在终端打印交互内容
+            print("\n" + "="*50)
+            print("原文:", text)
+            print("-"*50)
+            
             # 使用客户端进行翻译
-            return self.client.translate(messages, self.config.config["model"])
+            translated = self.client.translate(messages, self.config.config["model"])
+            
+            print("翻译结果:", translated)
+            print("="*50 + "\n")
+            
+            return translated
             
         except Exception as e:
             print(f"翻译文本失败: {str(e)}")
             return text
 
-    def translate_text_with_retry(self, text: str, use_terminology: bool = False) -> str:
+    def translate_text_with_retry(self, text: str, use_terminology: bool = False, retry_count: int = 0) -> str:
         """带重试机制的文本翻译"""
         if not text.strip() or not self._is_translatable(text):
             return text
         
         translations = []  # 存储多次翻译结果
-        retry_count = 0
         max_retries = 3
         
         # 进行多次翻译尝试
@@ -416,73 +457,199 @@ Original text: {original_text}
             return translations[-1] if translations else original_text
 
     def translate_text_with_verification(self, text: str, use_terminology: bool = False) -> str:
-        """带三重验证的文本翻译"""
+        """带验证的文本翻译，支持完整的数字保护和智能重试"""
         if not text.strip() or not self._is_translatable(text):
             return text
 
         try:
-            # 第一次翻译
-            first_translation = self.translate_text_with_retry(text, use_terminology)
-
-            # 检查翻译结果是否属于目标语种
-            if not self.is_target_language(first_translation):
-                # 如果不属于目标语种，重新翻译
-                first_translation = self.translate_text_with_retry(text, use_terminology)
-
-            # 第二次翻译(反向验证)
-            verification_prompt = f"""Please verify if the following translation is accurate:
-Original text: {text}
-Translation: {first_translation}
-
-Please return only the corrected translation without any other content. If the translation is accurate, return it as is."""
+            # 保护数字和特殊内容
+            protected_text, token_map = self._protect_special_content(text)
             
-            second_translation = self.client.translate([
-                {"role": "system", "content": "You are a professional translation reviewer."},
-                {"role": "user", "content": verification_prompt}
-            ], self.config.config["model"])
-
-            # 检查翻译结果是否属于目标语种
-            if not self.is_target_language(second_translation):
-                # 如果不属于目标语种，重新翻译
-                second_translation = self.client.translate([
-                    {"role": "system", "content": "You are a professional translation reviewer."},
-                    {"role": "user", "content": verification_prompt}
-                ], self.config.config["model"])
-
-            # 第三次翻译(最终确认)
-            final_prompt = f"""Please make a final confirmation of the following translation:
-Original text: {text}
-First translation: {first_translation}
-Second translation: {second_translation}
-
-Please return only the final confirmed translation without any other content. If both translations are accurate, choose and return the more accurate one."""
+            # 初始化重试参数
+            retry_count = 0
+            max_total_retries = 20  # 最大总重试次数
+            continuous_failures = 0  # 连续失败计数
+            base_wait_time = 1  # 基础等待时间（秒）
             
-            final_translation = self.client.translate([
-                {"role": "system", "content": "You are a senior translation expert."},
-                {"role": "user", "content": final_prompt}
-            ], self.config.config["model"])
-
-            # 检查翻译结果是否属于目标语种
-            if not self.is_target_language(final_translation):
-                # 如果不属于目标语种，重新翻译
-                final_translation = self.client.translate([
-                    {"role": "system", "content": "You are a senior translation expert."},
-                    {"role": "user", "content": final_prompt}
-                ], self.config.config["model"])
-
-            # 确保最终结果不包含中文
-            final_translation = self.prompt_manager.remove_chinese(final_translation)
-
-            # 检查翻译结果是否为空或仅包含标点符号
-            if not final_translation.strip() or final_translation.strip().isalnum():
-                # 如果翻译结果为空或仅包含标点符号，返回原文
-                return text
-
-            return final_translation
-
+            # 记录失败原因
+            failure_reasons = []
+            
+            while retry_count < max_total_retries:
+                try:
+                    # 使用不同的翻译变体
+                    translation = self.translate_text_with_retry(
+                        protected_text, 
+                        use_terminology,
+                        retry_count
+                    )
+                    
+                    # 恢复被保护的内容
+                    translation = self._restore_special_content(translation, token_map)
+                    
+                    # 验证翻译结果
+                    valid, reason = self._is_valid_translation_with_reason(text, translation)
+                    if valid:
+                        return translation
+                    
+                    # 记录失败原因
+                    failure_reasons.append(reason)
+                    continuous_failures += 1
+                    retry_count += 1
+                    
+                    # 使用指数退避策略计算等待时间
+                    wait_time = min(base_wait_time * (2 ** (continuous_failures - 1)), 10)
+                    print(f"第 {retry_count} 次翻译失败 ({reason})，等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                    
+                    # 如果连续失败次数过多，切换翻译策略
+                    if continuous_failures >= 3:
+                        protected_text = self._adjust_translation_strategy(
+                            text, 
+                            failure_reasons
+                        )
+                        continuous_failures = 0  # 重置连续失败计数
+                    
+                except Exception as e:
+                    print(f"翻译出错: {str(e)}")
+                    retry_count += 1
+                    continuous_failures += 1
+                    wait_time = min(base_wait_time * (2 ** (continuous_failures - 1)), 10)
+                    time.sleep(wait_time)
+            
+            print(f"达到最大重试次数 ({max_total_retries})，返回最佳候选结果")
+            return self._get_best_candidate(text, failure_reasons)
+            
         except Exception as e:
-            print(f"翻译验证失败: {str(e)}")
+            print(f"翻译过程发生错误: {str(e)}")
             return text
+
+    def _protect_special_content(self, text: str) -> Tuple[str, Dict[str, str]]:
+        """增强的数字和特殊内容保护"""
+        token_map = {}
+        
+        # 需要保护的模式
+        patterns = [
+            # 基本数字（整数、小数）
+            r'-?\d+\.?\d*',
+            # 分数
+            r'\d+/\d+',
+            # 科学计数法
+            r'-?\d+\.?\d*[eE][+-]?\d+',
+            # 带单位的数字
+            r'-?\d+\.?\d*\s*[a-zA-Z]+',
+            # 带括号的数字
+            r'\(\d+\.?\d*\)',
+            # 特殊格式（如 1-2, 1.2.3）
+            r'\d+[-\.]\d+(?:[-\.]\d+)*'
+        ]
+        
+        protected_text = text
+        for pattern in patterns:
+            def replace_match(match):
+                token = f"__TOKEN_{len(token_map)}__"
+                token_map[token] = match.group(0)
+                return token
+                
+            protected_text = re.sub(pattern, replace_match, protected_text)
+        
+        return protected_text, token_map
+
+    def _restore_special_content(self, text: str, token_map: Dict[str, str]) -> str:
+        """恢复被保护的内容"""
+        result = text
+        # 按token长度降序排序，避免部分替换问题
+        for token, value in sorted(token_map.items(), key=lambda x: len(x[0]), reverse=True):
+            result = result.replace(token, value)
+        return result
+
+    def _is_valid_translation_with_reason(self, original_text: str, translated_text: str) -> Tuple[bool, str]:
+        """带原因的翻译验证"""
+        try:
+            if not translated_text or not translated_text.strip():
+                return False, "空翻译结果"
+                
+            cleaned_text = self._clean_translation_output(translated_text)
+            if not cleaned_text:
+                return False, "清理后为空"
+                
+            if all(char in string.punctuation + ' ' for char in cleaned_text):
+                return False, "仅包含标点符号"
+                
+            if self.prompt_manager.has_chinese(cleaned_text):
+                return False, "包含中文字符"
+                
+            if len(cleaned_text.strip()) < 2:
+                return False, "翻译过短"
+                
+            instruction_keywords = ['must', 'requirement', 'output', 'translation:', 'example:']
+            if any(keyword in cleaned_text.lower() for keyword in instruction_keywords):
+                return False, "包含指令关键词"
+                
+            # 检查数字保护
+            original_numbers = set(re.findall(r'-?\d+\.?\d*', original_text))
+            translated_numbers = set(re.findall(r'-?\d+\.?\d*', cleaned_text))
+            if not original_numbers.issubset(translated_numbers):
+                return False, "数字未被正确保留"
+                
+            try:
+                detected_lang = detect(cleaned_text)
+                if detected_lang != 'en':
+                    return False, f"错误的语言类型: {detected_lang}"
+            except:
+                return False, "语言检测失败"
+                
+            return True, "有效翻译"
+                
+        except Exception as e:
+            return False, f"验证过程错误: {str(e)}"
+
+    def _adjust_translation_strategy(self, text: str, failure_reasons: List[str]) -> str:
+        """根据失败原因调整翻译策略"""
+        # 分析失败原因
+        reason_counts = {}
+        for reason in failure_reasons[-3:]:  # 只看最近的3次失败
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        
+        most_common_reason = max(reason_counts.items(), key=lambda x: x[1])[0]
+        
+        # 根据不同的失败原因采取不同的策略
+        if "包含中文字符" in most_common_reason:
+            # 强制使用英文翻译策略
+            return f"[FORCE_ENGLISH]{text}"
+        elif "数字未被正确保留" in most_common_reason:
+            # 增强数字保护
+            return f"[PROTECT_NUMBERS]{text}"
+        elif "仅包含标点符号" in most_common_reason:
+            # 要求完整翻译
+            return f"[FULL_TRANSLATION]{text}"
+        else:
+            # 默认策略：分段翻译
+            return f"[SEGMENT]{text}"
+
+    def _get_best_candidate(self, original_text: str, failure_reasons: List[str]) -> str:
+        """在所有尝试中选择最佳结果"""
+        try:
+            # 最后一次尝试：直接分词翻译
+            words = original_text.split()
+            translated_parts = []
+            
+            for word in words:
+                if not self._is_translatable(word):
+                    translated_parts.append(word)
+                    continue
+                    
+                # 使用最简单的翻译策略
+                translation = self.translate_text_with_retry(word, False, 0)
+                if self._is_valid_translation_with_reason(word, translation)[0]:
+                    translated_parts.append(translation)
+                else:
+                    translated_parts.append(word)
+            
+            return ' '.join(translated_parts)
+            
+        except Exception as e:
+            print(f"获取最佳候选失败: {str(e)}")
+            return original_text
 
     def is_target_language(self, text: str) -> bool:
         """检查文本是否属于目标语种"""
