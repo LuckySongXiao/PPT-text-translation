@@ -19,6 +19,7 @@ class TranslatorUI:
         self.translation_preview = None
         self.is_processing = False
         self.excel_queue = Queue()
+        self.terminal_output = []  # 添加用于存储终端输出的列表
 
         # 确保输出目录存在
         if not os.path.exists(self.output_dir):
@@ -71,40 +72,48 @@ class TranslatorUI:
                 "server_url": server_url if model_type == "本地模型" else None,
             })
             
+            # 设置翻译器的状态回调函数
+            def status_callback(status):
+                # 更新终端输出
+                if isinstance(status, dict):
+                    output = f"当前位置: {status.get('current_location', '')}\n"
+                    output += f"原文: {status.get('original_text', '')}\n"
+                    output += f"翻译: {status.get('translated_text', '')}\n"
+                    self.terminal_output.append(output)
+                else:
+                    self.terminal_output.append(str(status))
+
+            # 设置翻译器的进度回调函数
+            def progress_callback(progress):
+                if isinstance(progress, str):
+                    self.terminal_output.append(progress)
+
+            # 设置回调函数
+            self.translator.status_callback = status_callback
+            self.translator.progress_callback = progress_callback
+            
             # 执行翻译
             result = self.translator.translate_ppt(
                 str(input_file_path),
                 use_terminology=use_terminology
             )
             
-            # 清理用户上传的文件
-            input_file_path.unlink(missing_ok=True)
-            
-            # 从结果中获取翻译记录
-            translation_records = []
-            for record in result.get("translation_records", []):
-                translation_records.append({
-                    "页码": record.get("slide_number", ""),
-                    "位置": record.get("location", ""),
-                    "格式": record.get("format", "文本框"),
-                    "原文": record.get("original_text", ""),
-                    "翻译结果": record.get("translated_text", ""),
-                    "复检": 0
-                })
-            
-            # 实时更新Excel文件
-            if translation_records:
-                df = pd.DataFrame(translation_records)
-                df.to_excel(self.current_excel_path, index=False)
-                self.excel_queue.put(translation_records)
-            
-            # 修改返回数据的格式，确保包含表头信息
-            preview_data = {
-                "headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"],
-                "data": translation_records
-            }
+            # 读取最新的 Excel 文件数据
+            if self.current_excel_path and os.path.exists(self.current_excel_path):
+                try:
+                    df = pd.read_excel(self.current_excel_path)
+                    preview_data = {
+                        "headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"],
+                        "data": df.values.tolist()
+                    }
+                except Exception as e:
+                    print(f"读取Excel文件失败: {str(e)}")
+                    preview_data = {"headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"], "data": []}
+            else:
+                preview_data = {"headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"], "data": []}
             
             return [
+                "\n".join(self.terminal_output),
                 result.get("current_location", ""),
                 result.get("original_text", ""),
                 result.get("translated_text", ""),
@@ -113,11 +122,13 @@ class TranslatorUI:
             
         except Exception as e:
             error_msg = f"翻译失败: {str(e)}"
-            return [error_msg, "", "", {"headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"], "data": []}]
+            return [error_msg, "", "", "", {"headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"], "data": []}]
             
         finally:
-            self.is_processing = False
-    
+            self.terminal_output = []
+            self.translator.status_callback = None
+            self.translator.progress_callback = None
+
     def create_ui(self):
         with gr.Blocks(title="PPT翻译工具") as ui:
             with gr.Tabs():
@@ -149,7 +160,7 @@ class TranslatorUI:
                         
                         with gr.Group() as online_group:
                             online_model = gr.Dropdown(
-                                choices=["glm-4-flash", "glm-4-plus", "glm-zero-preview"],
+                                choices=["glm-4-flash", "glm-4-long", "glm-4-plus", "glm-zero-preview"],
                                 value="glm-4-flash",
                                 label="在线模型"
                             )
@@ -187,28 +198,18 @@ class TranslatorUI:
                     with gr.Row():
                         translate_btn = gr.Button("开始翻译", variant="primary")
                     
-                    # 翻译状态显示
+                    # 修改翻译状态显示部分
                     with gr.Row():
                         with gr.Column():
-                            current_location = gr.Textbox(
-                                label="当前位置",
-                                value="",
-                                interactive=False
-                            )
-                            original_text = gr.Textbox(
-                                label="原文",
+                            terminal_output = gr.TextArea(
+                                label="终端输出",
                                 value="",
                                 interactive=False,
-                                lines=3
-                            )
-                            translated_text = gr.Textbox(
-                                label="翻译结果",
-                                value="",
-                                interactive=False,
-                                lines=3
+                                lines=10,
+                                max_lines=10
                             )
                     
-                    # 修改复检部分的UI
+                    # 修改翻译记录部分
                     with gr.Row():
                         with gr.Column():
                             gr.Markdown("### 翻译记录与复检")
@@ -220,28 +221,29 @@ class TranslatorUI:
                                 col_count=(6, "fixed"),
                                 datatype=["str", "str", "str", "str", "str", "number"],
                                 column_widths=["10%", "15%", "10%", "25%", "25%", "15%"],
-                                value=[]  # 初始化空数据
+                                value=[],
+                                every=1.0  # 添加自动刷新
                             )
-                            
-                            with gr.Row():
-                                select_all_btn = gr.Button("全选")
-                                deselect_all_btn = gr.Button("取消全选")
-                                recheck_btn = gr.Button("复检选中内容", variant="primary")
-                                
-                            with gr.Row():
-                                manual_edit = gr.Textbox(
-                                    label="手动编辑翻译结果",
-                                    lines=3,
-                                    interactive=True
-                                )
-                                apply_edit_btn = gr.Button("应用修改")
-                                
-                            recheck_status = gr.Textbox(
-                                label="操作状态",
-                                value="",
-                                interactive=False
-                            )
-
+                    
+                    # 在预览表格下方添加按钮组
+                    with gr.Row():
+                        select_all_btn = gr.Button("全选")
+                        deselect_all_btn = gr.Button("取消全选")
+                        recheck_btn = gr.Button("复检选中内容", variant="primary")
+                    
+                    with gr.Row():
+                        manual_edit = gr.Textbox(
+                            label="手动编辑翻译",
+                            placeholder="输入新的翻译文本"
+                        )
+                        apply_edit_btn = gr.Button("应用编辑", variant="primary")
+                    
+                    with gr.Row():
+                        recheck_status = gr.Textbox(
+                            label="复检状态",
+                            interactive=False
+                        )
+                    
                     # 修改事件处理函数
                     def select_all(data):
                         if not isinstance(data, list) or not data:
@@ -364,18 +366,34 @@ class TranslatorUI:
                         outputs=[preview_table, recheck_status]
                     )
 
+                    # 添加刷新按钮
+                    refresh_preview_btn = gr.Button("刷新翻译记录")
+                    
+                    def refresh_preview():
+                        """刷新预览表格数据"""
+                        if self.current_excel_path and os.path.exists(self.current_excel_path):
+                            try:
+                                df = pd.read_excel(self.current_excel_path)
+                                return {
+                                    "headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"],
+                                    "data": df.values.tolist()
+                                }
+                            except Exception as e:
+                                print(f"刷新预览失败: {str(e)}")
+                        return {"headers": ["页码", "位置", "格式", "原文", "翻译结果", "复检"], "data": []}
+                    
+                    # 绑定刷新按钮事件
+                    refresh_preview_btn.click(
+                        fn=refresh_preview,
+                        inputs=[],
+                        outputs=[preview_table]
+                    )
+                    
                     # 修改翻译按钮的事件处理
                     def process_translation_result(result):
                         """处理翻译结果"""
-                        location, original, translated, preview = result
-                        if isinstance(preview, dict):
-                            return [
-                                location,
-                                original,
-                                translated,
-                                preview.get("data", [])
-                            ]
-                        return result
+                        terminal_text, location, original, translated, preview = result
+                        return [terminal_text, preview]
 
                     translate_btn.click(
                         fn=lambda *args: process_translation_result(self.translate_ppt(*args)),
@@ -389,9 +407,7 @@ class TranslatorUI:
                             local_model
                         ],
                         outputs=[
-                            current_location,
-                            original_text,
-                            translated_text,
+                            terminal_output,
                             preview_table
                         ]
                     )
@@ -480,16 +496,25 @@ class TranslatorUI:
             records.extend(batch)
             self.excel_queue.task_done()
         
-        # 创建DataFrame时确保列名唯一
-        columns = ["页码", "位置", "格式", "原文", "翻译结果", "复检"]
-        df = pd.DataFrame(records, columns=columns)
-        
-        # 确保列名唯一性
-        df = df.loc[:, ~df.columns.duplicated()]
-        
-        # 保存到Excel
-        df.to_excel(excel_path, index=False)
-        self.excel_queue.task_done() 
+        try:
+            # 创建DataFrame并保存
+            df = pd.DataFrame(records)
+            
+            # 确保列名正确
+            if not df.empty:
+                df.columns = ["页码", "位置", "格式", "原文", "翻译结果", "复检"]
+            
+            # 保存到Excel
+            df.to_excel(excel_path, index=False)
+            
+            # 更新预览表格数据
+            if hasattr(self, 'preview_table'):
+                self.preview_table = df.values.tolist()
+                
+        except Exception as e:
+            print(f"保存Excel文件失败: {str(e)}")
+        finally:
+            self.excel_queue.task_done()
 
     def update_translation_preview(self):
         # 检查Excel文件是否存在
