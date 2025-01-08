@@ -17,15 +17,15 @@ A professional PowerPoint translation tool that supports Chinese-English bidirec
 ## Installation / 安装方法
 
 bash
-git clone https://github.com/LuckySongXiao/PPT-text-translation.git
-cd PPT-text-translation
+git clone https://github.com/LuckySongXiao/PPT-text-translation.git/n
+cd PPT-text-translation/n
 pip install -r requirements.txt
 
 ## Usage / 使用方法
 1. Start the application / 启动应用：
 
 Modify your own zhipuai API key in the path PPT text translation\src\utils\config.py
-/
+//n
 在路径PPT text  translation\src\utils\config.py中修改自己的zhipuai的APIkey
 
 bash
