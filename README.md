@@ -25,6 +25,7 @@ pip install -r requirements.txt
 1. Start the application / 启动应用：
 
 Modify your own zhipuai API key in the path PPT text translation\src\utils\config.py
+/
 在路径PPT text  translation\src\utils\config.py中修改自己的zhipuai的APIkey
 
 bash
