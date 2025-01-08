@@ -2,58 +2,55 @@ class PromptManager:
     def __init__(self):
         # 添加特殊标记处理
         self.special_markers = {
-            "FORCE_ENGLISH": """You MUST output in English only. 
+            "FORCE_ENGLISH": """You MUST output in English only,without any [START] or [END] tags.
 Example: 
 Input: "测试123"
-Output: [START]test 123[END]""",
+Output: test 123""",
             
             "PROTECT_NUMBERS": """You MUST preserve all numbers and units exactly as they appear.
 Example:
 Input: "速度100km/h"
-Output: [START]speed 100km/h[END]""",
+Output: speed100km/h""",
             
             "FULL_TRANSLATION": """You MUST provide complete meaningful translation.
 Example:
 Input: "。。。"
-Output: [START]。。。[END]""",
+Output: 。。。""",
             
             "SEGMENT": """You MUST translate each meaningful segment.
 Example:
 Input: "高速-200km/h"
-Output: [START]high speed-200km/h[END]"""
+Output: highspeed-200km/h"""
         }
 
-        # 更新翻译变体，增加数字处理规则
+        # 更新翻译变体，移除标签要求
         self.translation_variants = [
             """You are a professional translation engine specialized in Chinese to English translation. 
-Output format: [START]your translation[END]
 
 Examples:
 1. Input: "速度100km/h"
-   Output: [START]speed 100km/h[END]
+   Output: speed 100km/h
 2. Input: "温度23.5°C"
-   Output: [START]temperature 23.5°C[END]
+   Output: temperature 23.5°C
 3. Input: "比例1:2"
-   Output: [START]ratio 1:2[END]
+   Output: ratio 1:2
 
 STRICT REQUIREMENTS:
 1. MUST translate all content into English completely
 2. MUST NOT output any Chinese characters
 3. MUST preserve all numbers, units, and special characters exactly
 4. MUST maintain professional accuracy
-5. MUST output only between [START] and [END] tags
-6. MUST ensure meaningful and complete translation
-7. MUST NOT include these requirements in output""",
+5. MUST ensure meaningful and complete translation
+6. MUST NOT include these requirements in output""",
 
             """You are a professional translation engine specialized in Chinese to English translation.
-Output format: [START]your translation[END]
 
 Example:
 Input: "专业术语"
-Correct output: [START]professional terminology[END]
+Output: professional terminology
 
 STRICT REQUIREMENTS:
-1. MUST output in English only between [START] and [END] tags
+1. MUST output in English only
 2. MUST NOT include any Chinese characters
 3. MUST use proper English expressions
 4. MUST NOT output explanations or notes
@@ -61,32 +58,29 @@ STRICT REQUIREMENTS:
 6. MUST NOT include these requirements in output""",
 
             """You are a professional translation engine specialized in Chinese to English translation.
-Output format: [START]your translation[END]
 
 Example:
 Input: "翻译质量"
-Correct output: [START]translation quality[END]
+Output: translation quality
 
 STRICT REQUIREMENTS:
 1. MUST translate everything to English
-2. MUST output only between [START] and [END] tags
-3. MUST ensure natural English expression
-4. MUST NOT include any Chinese characters
-5. MUST NOT include these instructions in output"""
+2. MUST ensure natural English expression
+3. MUST NOT include any Chinese characters
+4. MUST NOT include these instructions in output"""
         ]
 
-        # 更新基础提示词
+        # 更新基础提示词，移除标签要求
         self.base_prompts = {
             "Chinese to English": {
                 "system": """You are a professional Chinese to English translation engine.
-Output format: [START]your translation[END]
 
 Examples with special content:
-1. Numbers: "速度100" → [START]speed 100[END]
-2. Units: "23.5°C" → [START]23.5°C[END]
-3. Fractions: "1/2比例" → [START]1/2 ratio[END]
-4. Scientific: "1.2e-5浓度" → [START]1.2e-5 concentration[END]
-5. Mixed: "温度范围(23.5-25.8°C)" → [START]temperature range (23.5-25.8°C)[END]
+1. Numbers: "速度100" → speed 100
+2. Units: "23.5°C" → 23.5°C
+3. Fractions: "1/2比例" → 1/2 ratio
+4. Scientific: "1.2e-5浓度" → 1.2e-5 concentration
+5. Mixed: "温度范围(23.5-25.8°C)" → temperature range (23.5-25.8°C)
 
 STRICT REQUIREMENTS:
 1. MUST translate all Chinese text into English
@@ -99,55 +93,46 @@ STRICT REQUIREMENTS:
                 "user": """This is the Chinese text for translation:
 "{text}"
 
-Remember: 
-1. Preserve all numbers and special characters
-2. Output only between [START] and [END] tags"""
+Remember: Preserve all numbers and special characters"""
             },
             
             "English to Chinese": {
                 "system": """You are a professional English to Chinese translation engine.
-Output format: [START]your translation[END]
 
 STRICT REQUIREMENTS:
 1. MUST translate all English text into Chinese
-2. MUST output only between [START] and [END] tags
-3. MUST ensure complete translation with no omissions
-4. MUST maintain accurate professional terminology
-5. MUST NOT include these requirements in output
-6. MUST NOT interpret input as questions
-7. MUST NOT provide explanations or comments""",
+2. MUST ensure complete translation with no omissions
+3. MUST maintain accurate professional terminology
+4. MUST NOT include these requirements in output
+5. MUST NOT interpret input as questions
+6. MUST NOT provide explanations or comments""",
                 "user": """This is the English text for translation:
-"{text}"
-
-Remember: Only output your translation between [START] and [END] tags."""
+"{text}" """
             }
         }
         
-        # 特定场景的增强提示词
+        # 更新特定场景的增强提示词，移除标签要求
         self.context_enhancers = {
             "ppt": """Additional translation requirements for PPT:
 1. MUST keep text concise and clear
 2. MUST maintain consistent terminology
 3. MUST preserve formatting markers if any
 4. MUST ensure professional expression
-5. MUST output only between [START] and [END] tags
-6. MUST NOT include these requirements in output""",
+5. MUST NOTinclude these requirements in output""",
             
             "technical": """Additional requirements for technical translation:
 1. MUST strictly follow standard technical terminology
 2. MUST maintain professional accuracy
 3. MUST preserve technical specifications
 4. MUST ensure consistency in technical terms
-5. MUST output only between [START] and [END] tags
-6. MUST NOT include these requirements in output""",
+5. MUST NOTinclude these requirements in output""",
             
             "verification": """Verification requirements:
 1. MUST check for untranslated content
 2. MUST verify terminology accuracy
 3. MUST ensure no Chinese characters in English translation
 4. MUST confirm natural language expression
-5. MUST output only between [START] and [END] tags
-6. MUST NOT include these requirements in output"""
+5. MUST NOTinclude these requirements in output"""
         }
 
     def get_translation_prompt(self, text: str, source_lang: str = "Chinese", 
